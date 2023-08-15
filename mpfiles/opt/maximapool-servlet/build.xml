@@ -1,0 +1,19 @@
+<project name="MaximaPool" default="dist" basedir=".">
+	<description>
+		MaximaPool.war creator
+	</description>
+
+	<property name="target.java.version" value="${ant.java.version}"/>
+
+	<target name="dist">
+		<echo>Building for Java version: ${target.java.version}</echo>
+		<mkdir dir="build"/>
+		<copy file="servlet.conf" tofile="build/servlet.conf"/>
+		<javac fork="yes" srcdir="src" destdir="build" debug="on" classpath="lib/servlet-api.jar"
+				includeAntRuntime="false" target="${target.java.version}" source="${target.java.version}"/>
+		<war destfile="MaximaPool.war" webxml="misc/web.xml" manifest="misc/MANIFEST.MF">
+			<classes dir="build"/>
+		</war>
+		<delete dir="build"/>
+	</target>
+</project>

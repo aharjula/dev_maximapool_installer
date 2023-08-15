@@ -1,0 +1,180 @@
+- hosts: maximapool
+  serial: 1
+  remote_user: root
+  tasks:
+  - name: install tomcat and some tools for setting up maxima and the pool
+    when: ansible_distribution_release == "jammy"
+    apt: name={{ item }} state=present
+    with_items:
+      - openjdk-11-jre-headless
+      - openjdk-11-jdk-headless
+      - tomcat9
+      - ant
+      - make
+      - sbcl
+      - texinfo
+      - recode
+      - gnuplot-nox
+      - nginx
+
+  - name: provide some insecure entropy for tomcat to work with
+    apt:
+      name: haveged
+      state: present
+
+  - name: set the memory settings for tomcat
+    when: ansible_distribution_release == "jammy"
+    copy:
+      dest: /etc/default/tomcat9
+      content: |
+        TOMCAT8_USER=tomcat9
+        TOMCAT8_GROUP=tomcat9
+        JAVA_OPTS="-Djava.awt.headless=true -XX:+UseConcMarkSweepGC -Xms256m -Xmx6000m -XX:MaxPermSize=256m -server"
+
+    notify: "restart tomcat"
+
+  - name: setup some paths
+    file:
+      path: "{{ item }}"
+      state: directory
+      recurse: yes
+    with_items:
+      - '/opt/maximapool-servlet'
+      - '/opt/maximapool-configs'
+      - '/opt/maxima-src'
+      - '/opt/maxima-bin'
+
+  - name: load in data
+    synchronize:
+      src: 'mpfiles/'
+      dest: '/'
+      delete: no
+      archive: no
+      checksum: yes
+      recursive: yes
+    notify: 
+      - rebuild images
+      - recompile servlet
+
+  - name: symlink the servlet
+    when: ansible_distribution_release == "jammy"
+    file:
+      force: yes
+      state: link
+      dest: /var/lib/tomcat9/webapps/MaximaPool.war
+      src: /opt/maximapool-servlet/MaximaPool.war
+    notify: "restart tomcat"
+
+  - name: unpack maxima sources
+    command: "/bin/tar xf maxima-{{ item }}.tar.gz"
+    args:
+      chdir: /opt/maxima-src/
+      creates: "/opt/maxima-src/maxima-{{ item }}"
+    with_items: "{{ maxima_versions.split(',') }}"
+    when: not item == ''
+
+  - name: configure maxima
+    # TODO: make this not happen as root...
+    command: "/opt/maxima-src/maxima-{{ item }}/configure --enable-sbcl --prefix=/opt/maxima-bin/{{ item }}"
+    args:
+      chdir: "/opt/maxima-src/maxima-{{ item }}/"
+      creates: "/opt/maxima-src/maxima-{{ item }}/config.log"
+    with_items: "{{ maxima_versions.split(',') }}"
+    when: not item == ''
+
+  - name: compile maxima
+    # TODO: make this not happen as root...
+    command: /usr/bin/make
+    args:
+      chdir: "/opt/maxima-src/maxima-{{ item }}/"
+      creates: "/opt/maxima-src/maxima-{{ item }}/src/binary-sbcl"
+    with_items: "{{ maxima_versions.split(',') }}"
+    when: not item == ''
+
+  - name: install maxima
+    command: /usr/bin/make install
+    args:
+      chdir: "/opt/maxima-src/maxima-{{ item }}/"
+      creates: "/opt/maxima-bin/{{ item }}"
+    with_items: "{{ maxima_versions.split(',') }}"
+    when: not item == ''
+
+  - name: enable tomcat
+    when: ansible_distribution_release == "jammy"
+    service:
+      name: tomcat9
+      enabled: yes
+      state: started
+
+  - name: POST-proxy config
+    copy:
+      dest: /etc/nginx/sites-enabled/maximapool.conf
+      content: |
+        proxy_cache_path /var/local/mpcache levels=1:2 keys_zone=mp_zone:50m inactive=60000m;
+        server {
+          listen 80 default_server;
+          location / {
+            client_body_buffer_size 256k;
+            client_max_body_size 256k;
+            proxy_ignore_headers X-Accel-Expires Expires Cache-Control;
+            proxy_cache_methods POST;
+            proxy_cache_valid any 90d;
+            proxy_buffers 8 128k;
+            proxy_buffer_size 128k;
+            proxy_cache_key "$uri|$request_body";
+            proxy_cache mp_zone;
+            add_header X-Proxy-Cache $upstream_cache_status;
+            proxy_pass http://127.0.0.1:8080$request_uri;
+          }
+        }
+    notify: "restart nginx"
+
+  - name: remove nginx default sites
+    file:
+      path: /etc/nginx/sites-enabled/default
+      state: absent
+    notify: "restart nginx"
+
+
+  - name: enable nginx
+    service:
+      name: nginx
+      enabled: yes
+      state: started
+
+
+  handlers:
+  - name: rebuild images
+    command: "/opt/maximapool-configs/gen.sh"
+    notify: 
+      - restart tomcat
+      - clear nginx cache
+  
+  - name: clear nginx cache
+    file:
+      path: /var/local/mpcache
+      state: absent
+    notify: "restart nginx" 
+
+  - name: recompile servlet
+    command: /usr/bin/ant
+    args:
+      chdir: /opt/maximapool-servlet
+    notify: "restart tomcat"
+
+  - name: restart tomcat
+    when: ansible_distribution_release == "jammy"
+    service:
+      name: tomcat9
+      state: restarted
+    notify: "prime pool"
+
+  - name: restart nginx
+    service:
+      name: nginx
+      state: restarted
+
+  - name: prime pool
+    get_url:
+      url: http://localhost:8080/MaximaPool/MaximaPool
+      dest: /tmp/mp-prime

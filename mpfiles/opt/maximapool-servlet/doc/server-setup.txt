@@ -1,0 +1,40 @@
+When Maxima Pool is installed on a server, the folder layout will probably look
+something like this: (only key files shown)
+
+/usr/bin/                     # Installed as part of RHEL.
+    gnuplot
+    maxima                    # Actually, we use maxima-optimised, but this is present.
+
+/usr/share/tomcat8/webapps/ or /var/lib/tomcat8/webapps/
+    MaximaPool.war            # The compiled code. This is what we upload.
+    MaximaPool/               # Expanded version of the .war file. Mostly standard.
+        META-INF/
+            MANIFEST.MF
+        WEB-INF/
+            web.xml
+            classes/
+                servlet.conf  # Configuration filewith directory.root & admin.password.
+                ...           # All the compiled classes.
+
+/usr/share/tomcat8/logs/      # The Tomcat logs.
+
+/var/lib/maximapool/          # This is the path directory.root from servlet.conf.
+    pool.conf                 # Configuration for the whole pool.
+    2013073001/               # Directory name is a STACK Maxima code version number.
+        process.conf          # Configuration settings for this version.
+        maxima-optimised      # The pre-compiled Maxima executable.
+        maximalocal.mac       # Extra file loaded on start-up.
+        maxima/               # Copy of this version of question/type/stack/stack/maxima.
+    2013122500/               # ... can be mulitple versions present simultaniously.
+    ...
+
+
+gnuplot and maxima will have been installed using whatever package manager your
+operating system uses.
+
+MaximaPool.war comes from running the Ant build script build.xml after you have
+created servlet.conf by editing servlet.example.conf.
+
+pool.conf can be made by copying pool.example.conf and editing.
+
+You can add and remove versions of the Maxima code without stopping the server.
