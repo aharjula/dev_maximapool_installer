@@ -16,6 +16,7 @@
       - recode
       - gnuplot-nox
       - nginx
+      - rlwrap
 
   - name: provide some insecure entropy for tomcat to work with
     apt:
